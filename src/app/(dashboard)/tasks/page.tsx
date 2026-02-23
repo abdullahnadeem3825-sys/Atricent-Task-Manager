@@ -90,9 +90,8 @@ const TaskCard = ({
           )}
           <div className="flex items-center justify-between mt-auto pt-2 border-t border-gray-100 dark:border-gray-700/50">
             <div className="flex -space-x-1.5 overflow-hidden">
-              {(task.assignees || []).map((assigneeWrapper: any) => {
-                const profile = assigneeWrapper.profile || assigneeWrapper; // Handle both wrapped and direct structures if any
-                return (
+              {Array.isArray(task.assignees) && task.assignees.length > 0 ? (
+                task.assignees.map((profile: any) => (
                   <div
                     key={profile.id}
                     className="w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/40 border border-white dark:border-gray-800 flex items-center justify-center text-[8px] font-bold text-blue-600 dark:text-blue-400"
@@ -100,9 +99,8 @@ const TaskCard = ({
                   >
                     {profile.full_name?.charAt(0) || "?"}
                   </div>
-                );
-              })}
-              {(!task.assignees || task.assignees.length === 0) && (
+                ))
+              ) : (
                 <span className="text-[10px] text-gray-400">Unassigned</span>
               )}
             </div>
@@ -264,6 +262,8 @@ export default function TasksPage() {
     due_date: "",
     category_id: "",
     status: "",
+    estimated_hours: "",
+    actual_hours: "",
   });
   const [aiResult, setAiResult] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -301,32 +301,41 @@ export default function TasksPage() {
   }, [supabase]);
 
   const fetchData = useCallback(async () => {
-    // Try fetching with assignees join first
-    let taskResult = await supabase
+    // 1. Fetch tasks with categories
+    const { data: taskData } = await supabase
       .from("tasks")
-      .select(
-        "*, category:categories(id, name, color), assignees:task_assignees(profile:profiles(id, full_name, email))",
-      )
+      .select("*, category:categories(id, name, color)")
       .order("created_at", { ascending: false });
 
-    // If join fails (e.g. task_assignees table missing), fall back to simple query
-    if (taskResult.error) {
-      console.warn(
-        "task_assignees join failed, falling back:",
-        taskResult.error.message,
-      );
-      taskResult = await supabase
-        .from("tasks")
-        .select("*, category:categories(id, name, color)")
-        .order("created_at", { ascending: false });
-    }
+    // 2. Fetch all task_assignees (raw rows)
+    const { data: assigneeRows } = await supabase
+      .from("task_assignees")
+      .select("task_id, user_id");
+
+    // 3. Fetch all profiles for mapping
+    const { data: allProfiles } = await supabase
+      .from("profiles")
+      .select("id, full_name, email");
 
     const { data: catData } = await supabase.from("categories").select("*");
 
-    // Transform assignees
-    const formattedTasks = (taskResult.data || []).map((t: any) => ({
+    // Build a profile lookup map
+    const profileMap = new Map((allProfiles || []).map((p: any) => [p.id, p]));
+
+    // Group assignees by task_id with resolved profiles
+    const taskAssigneeMap: Record<string, any[]> = {};
+    for (const row of assigneeRows || []) {
+      const profile = profileMap.get(row.user_id);
+      if (profile) {
+        if (!taskAssigneeMap[row.task_id]) taskAssigneeMap[row.task_id] = [];
+        taskAssigneeMap[row.task_id].push(profile);
+      }
+    }
+
+    // Merge assignees into tasks
+    const formattedTasks = (taskData || []).map((t: any) => ({
       ...t,
-      assignees: t.assignees?.map((a: any) => a.profile).filter(Boolean) || [],
+      assignees: taskAssigneeMap[t.id] || [],
     }));
 
     setTasks(formattedTasks);
@@ -383,6 +392,12 @@ export default function TasksPage() {
         category_id: newTask.category_id,
         status: statusToUse,
         created_by: profile?.id,
+        estimated_hours: newTask.estimated_hours
+          ? parseFloat(newTask.estimated_hours)
+          : null,
+        actual_hours: newTask.actual_hours
+          ? parseFloat(newTask.actual_hours)
+          : null,
       })
       .select()
       .single();
@@ -413,6 +428,8 @@ export default function TasksPage() {
         due_date: "",
         category_id: "",
         status: statuses[0]?.value || "",
+        estimated_hours: "",
+        actual_hours: "",
       });
       fetchData();
     }
@@ -950,6 +967,26 @@ export default function TasksPage() {
                 setNewTask((p) => ({ ...p, due_date: e.target.value }))
               }
             />
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Estimated Hours"
+                type="number"
+                value={newTask.estimated_hours}
+                onChange={(e) =>
+                  setNewTask((p) => ({ ...p, estimated_hours: e.target.value }))
+                }
+                placeholder="e.g. 4"
+              />
+              <Input
+                label="Actual Hours"
+                type="number"
+                value={newTask.actual_hours}
+                onChange={(e) =>
+                  setNewTask((p) => ({ ...p, actual_hours: e.target.value }))
+                }
+                placeholder="e.g. 6"
+              />
+            </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button
                 variant="secondary"
@@ -1037,20 +1074,17 @@ export default function TasksPage() {
                     Assignees
                   </label>
                   <div className="flex -space-x-1.5 overflow-hidden mt-1 pl-1">
-                    {showDetail.assignees && showDetail.assignees.length > 0 ? (
-                      showDetail.assignees.map((assigneeWrapper: any) => {
-                        const profile =
-                          assigneeWrapper.profile || assigneeWrapper;
-                        return (
-                          <div
-                            key={profile.id}
-                            className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/40 border border-white dark:border-gray-800 flex items-center justify-center text-[10px] font-bold text-blue-600 dark:text-blue-400"
-                            title={profile.full_name}
-                          >
-                            {profile.full_name?.charAt(0) || "?"}
-                          </div>
-                        );
-                      })
+                    {Array.isArray(showDetail.assignees) &&
+                    showDetail.assignees.length > 0 ? (
+                      showDetail.assignees.map((profile: any) => (
+                        <div
+                          key={profile.id}
+                          className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/40 border border-white dark:border-gray-800 flex items-center justify-center text-[10px] font-bold text-blue-600 dark:text-blue-400"
+                          title={profile.full_name}
+                        >
+                          {profile.full_name?.charAt(0) || "?"}
+                        </div>
+                      ))
                     ) : (
                       <p className="text-sm text-gray-900 dark:text-white">
                         Unassigned
@@ -1081,6 +1115,100 @@ export default function TasksPage() {
                   </p>
                 </div>
               )}
+
+              {/* Time Tracking */}
+              <div className="grid grid-cols-2 gap-4 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <div>
+                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    Estimated Hours
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    value={showDetail.estimated_hours ?? ""}
+                    onChange={async (e) => {
+                      const val = e.target.value
+                        ? parseFloat(e.target.value)
+                        : null;
+                      await supabase
+                        .from("tasks")
+                        .update({ estimated_hours: val })
+                        .eq("id", showDetail.id);
+                      setShowDetail((prev) =>
+                        prev ? { ...prev, estimated_hours: val } : null,
+                      );
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === showDetail.id
+                            ? { ...t, estimated_hours: val }
+                            : t,
+                        ),
+                      );
+                    }}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    Actual Hours
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    value={showDetail.actual_hours ?? ""}
+                    onChange={async (e) => {
+                      const val = e.target.value
+                        ? parseFloat(e.target.value)
+                        : null;
+                      await supabase
+                        .from("tasks")
+                        .update({ actual_hours: val })
+                        .eq("id", showDetail.id);
+                      setShowDetail((prev) =>
+                        prev ? { ...prev, actual_hours: val } : null,
+                      );
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === showDetail.id
+                            ? { ...t, actual_hours: val }
+                            : t,
+                        ),
+                      );
+                    }}
+                    placeholder="0"
+                  />
+                </div>
+                {showDetail.estimated_hours != null &&
+                  showDetail.actual_hours != null && (
+                    <div className="col-span-2">
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-gray-500 dark:text-gray-400">
+                          Progress
+                        </span>
+                        <span
+                          className={`font-medium ${showDetail.actual_hours > showDetail.estimated_hours ? "text-red-500" : "text-green-500"}`}
+                        >
+                          {showDetail.actual_hours}h /{" "}
+                          {showDetail.estimated_hours}h
+                          {showDetail.actual_hours >
+                            showDetail.estimated_hours && " (over)"}
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${showDetail.actual_hours > showDetail.estimated_hours ? "bg-red-500" : "bg-green-500"}`}
+                          style={{
+                            width: `${Math.min(100, (showDetail.actual_hours / showDetail.estimated_hours) * 100)}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+              </div>
 
               {/* AI Actions */}
               <div className="border-t border-gray-200 dark:border-gray-700 pt-4">

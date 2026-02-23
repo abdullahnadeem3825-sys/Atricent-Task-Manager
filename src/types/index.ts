@@ -60,6 +60,8 @@ export interface Task {
   // assigned_to: string; // Deprecated
   created_by: string;
   due_date: string | null;
+  estimated_hours: number | null;
+  actual_hours: number | null;
   created_at: string;
   updated_at: string;
   // Joined

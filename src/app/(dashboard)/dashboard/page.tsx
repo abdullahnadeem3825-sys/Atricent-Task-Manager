@@ -58,26 +58,47 @@ export default async function DashboardPage() {
 
   const readIds = new Set(reads?.map((r) => r.announcement_id) || []);
 
-  // Recent tasks — try with assignees join, fall back if table missing
-  let taskResult = await supabase
+  // Recent tasks — fetch tasks + assignees separately for reliability
+  const { data: recentTaskData } = await supabase
     .from("tasks")
-    .select(
-      "*, category:categories(name, color), assignees:task_assignees(profile:profiles(full_name))",
-    )
+    .select("*, category:categories(name, color)")
     .order("updated_at", { ascending: false })
     .limit(8);
 
-  if (taskResult.error) {
-    taskResult = await supabase
-      .from("tasks")
-      .select("*, category:categories(name, color)")
-      .order("updated_at", { ascending: false })
-      .limit(8);
+  // Fetch assignees for these tasks
+  const recentTaskIds = (recentTaskData || []).map((t: any) => t.id);
+  let assigneeRows: any[] = [];
+  if (recentTaskIds.length > 0) {
+    const { data } = await supabase
+      .from("task_assignees")
+      .select("task_id, user_id")
+      .in("task_id", recentTaskIds);
+    assigneeRows = data || [];
   }
 
-  const recentTasks = (taskResult.data || []).map((t: any) => ({
+  // Fetch profiles for assignees
+  const assigneeUserIds = [...new Set(assigneeRows.map((r: any) => r.user_id))];
+  let assigneeProfiles: any[] = [];
+  if (assigneeUserIds.length > 0) {
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", assigneeUserIds);
+    assigneeProfiles = data || [];
+  }
+  const profileLookup = new Map(assigneeProfiles.map((p: any) => [p.id, p]));
+  const taskAssignees: Record<string, any[]> = {};
+  for (const row of assigneeRows) {
+    const prof = profileLookup.get(row.user_id);
+    if (prof) {
+      if (!taskAssignees[row.task_id]) taskAssignees[row.task_id] = [];
+      taskAssignees[row.task_id].push(prof);
+    }
+  }
+
+  const recentTasks = (recentTaskData || []).map((t: any) => ({
     ...t,
-    assignees: t.assignees?.map((a: any) => a.profile).filter(Boolean) || [],
+    assignees: taskAssignees[t.id] || [],
   }));
 
   return (
