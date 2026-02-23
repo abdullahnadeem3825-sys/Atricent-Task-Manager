@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #3b82f6;
+  --color-primary-dark: #2563eb;
+}
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100 antialiased;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(1rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+}
+
+/* Markdown content styling for AI responses */
+.prose-chat pre {
+  @apply bg-gray-900 dark:bg-gray-950 rounded-lg p-4 overflow-x-auto my-2;
+}
+
+.prose-chat code {
+  @apply bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-sm;
+}
+
+.prose-chat pre code {
+  @apply bg-transparent p-0;
+}
+
+.prose-chat ul {
+  @apply list-disc pl-5 my-2;
+}
+
+.prose-chat ol {
+  @apply list-decimal pl-5 my-2;
+}
+
+.prose-chat p {
+  @apply my-1.5;
+}
+
+.prose-chat h1, .prose-chat h2, .prose-chat h3 {
+  @apply font-bold mt-3 mb-1;
+}
+
+.prose-chat h1 { @apply text-xl; }
+.prose-chat h2 { @apply text-lg; }
+.prose-chat h3 { @apply text-base; }
+
+.prose-chat blockquote {
+  @apply border-l-4 border-gray-300 dark:border-gray-600 pl-4 italic my-2;
+}
+
+.prose-chat a {
+  @apply text-blue-600 dark:text-blue-400 underline;
+}
+
+.prose-chat table {
+  @apply w-full border-collapse my-2;
+}
+
+.prose-chat th, .prose-chat td {
+  @apply border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm;
+}
+
+.prose-chat th {
+  @apply bg-gray-100 dark:bg-gray-800 font-medium;
+}
