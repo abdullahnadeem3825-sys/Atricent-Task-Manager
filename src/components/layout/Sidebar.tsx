@@ -220,7 +220,7 @@ export default function Sidebar() {
       </nav>
 
       {/* User section */}
-      <div className="p-3 border-t border-gray-200 dark:border-gray-800">
+      {/* <div className="p-3 border-t border-gray-200 dark:border-gray-800">
         {profile && (
           <div
             className={`flex items-center ${collapsed ? "justify-center" : "gap-3"}`}
@@ -261,7 +261,7 @@ export default function Sidebar() {
             )}
           </div>
         )}
-      </div>
+      </div> */}
     </aside>
   );
 }

@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     const prompt = TASK_ACTION_PROMPTS[action](task);
 
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-3.1-pro-preview',
       systemInstruction: 'You are a project management AI assistant. Provide concise, actionable responses for task management operations. Be specific and practical.',
     });
 

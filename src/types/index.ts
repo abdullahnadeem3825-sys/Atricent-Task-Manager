@@ -1,5 +1,15 @@
 export type AppRole = 'admin' | 'employee';
-export type TaskStatus = 'todo' | 'in_progress' | 'done';
+export type TaskStatus = string;
+
+export interface TaskStatusColumn {
+  id: string;
+  value: string;
+  label: string;
+  color: string;
+  position: number;
+  is_default: boolean;
+  created_at: string;
+}
 export type AnnouncementPriority = 'info' | 'warning' | 'urgent';
 
 export interface Profile {
@@ -35,6 +45,11 @@ export interface CategoryMember {
   profile?: Profile;
 }
 
+export interface TaskAssignee {
+  user_id: string;
+  profile: Profile;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -42,14 +57,15 @@ export interface Task {
   status: TaskStatus;
   priority: number; // 1=low, 2=medium, 3=high, 4=urgent
   category_id: string;
-  assigned_to: string;
+  // assigned_to: string; // Deprecated
   created_by: string;
   due_date: string | null;
   created_at: string;
   updated_at: string;
   // Joined
   category?: Category;
-  assignee?: Profile;
+  // assignee?: Profile; // Deprecated
+  assignees?: Profile[];
   creator?: Profile;
 }
 

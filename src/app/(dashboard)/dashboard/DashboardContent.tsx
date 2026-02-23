@@ -136,7 +136,11 @@ export default function DashboardContent({
                       </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         {(task.category as any)?.name} ·{" "}
-                        {(task.assignee as any)?.full_name}
+                        {task.assignees && task.assignees.length > 0
+                          ? task.assignees
+                              .map((a: any) => a.full_name)
+                              .join(", ")
+                          : "Unassigned"}
                       </p>
                     </div>
                     <Badge className={priorityInfo?.color}>

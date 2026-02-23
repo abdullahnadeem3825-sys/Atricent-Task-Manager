@@ -8,6 +8,7 @@ import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
+import MultiSelect from "@/components/ui/MultiSelect";
 import Badge from "@/components/ui/Badge";
 import Spinner from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
@@ -15,8 +16,15 @@ import {
   TASK_STATUSES,
   TASK_PRIORITIES,
   AI_TASK_ACTIONS,
+  DEFAULT_TASK_STATUSES,
 } from "@/lib/constants";
-import type { Task, Category, Profile, TaskStatus } from "@/types";
+import type {
+  Task,
+  Category,
+  Profile,
+  TaskStatus,
+  TaskStatusColumn,
+} from "@/types";
 import Link from "next/link";
 
 export default function CategoryDetailPage({
@@ -31,15 +39,17 @@ export default function CategoryDetailPage({
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [statuses, setStatuses] = useState<TaskStatusColumn[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [showDetail, setShowDetail] = useState<Task | null>(null);
   const [saving, setSaving] = useState(false);
   const [newTask, setNewTask] = useState({
     title: "",
     description: "",
-    assigned_to: "",
+    assignees: [] as string[],
     priority: 2,
     due_date: "",
+    status: "",
   });
   const [aiResult, setAiResult] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -52,12 +62,62 @@ export default function CategoryDetailPage({
       .single();
     setCategory(cat);
 
-    const { data: taskData } = await supabase
+    const { data: statusData } = await supabase
+      .from("task_statuses")
+      .select("*")
+      .order("position", { ascending: true });
+
+    if (statusData && statusData.length > 0) {
+      setStatuses(statusData);
+      // Initialize default status
+      if (!newTask.status) {
+        setNewTask((prev) => ({ ...prev, status: statusData[0].value }));
+      }
+    } else {
+      const defaults = DEFAULT_TASK_STATUSES.map((s, i) => ({
+        id: s.value,
+        value: s.value,
+        label: s.label,
+        color: s.color,
+        position: i,
+        is_default: true,
+        created_at: new Date().toISOString(),
+      }));
+      setStatuses(defaults);
+      if (!newTask.status) {
+        setNewTask((prev) => ({ ...prev, status: defaults[0].value }));
+      }
+    }
+
+    // Try with assignees join first
+    let taskResult = await supabase
       .from("tasks")
-      .select("*, assignee:profiles!assigned_to(id, full_name, email)")
+      .select(
+        "*, assignees:task_assignees(profile:profiles(id, full_name, email))",
+      )
       .eq("category_id", id)
       .order("created_at", { ascending: false });
-    setTasks(taskData || []);
+
+    // Fall back if task_assignees table missing
+    if (taskResult.error) {
+      console.warn(
+        "task_assignees join failed, falling back:",
+        taskResult.error.message,
+      );
+      taskResult = await supabase
+        .from("tasks")
+        .select("*")
+        .eq("category_id", id)
+        .order("created_at", { ascending: false });
+    }
+
+    // Transform
+    const formattedTasks = (taskResult.data || []).map((t: any) => ({
+      ...t,
+      assignees: t.assignees?.map((a: any) => a.profile).filter(Boolean) || [],
+    }));
+
+    setTasks(formattedTasks);
 
     const { data: memberData } = await supabase
       .from("category_members")
@@ -72,31 +132,51 @@ export default function CategoryDetailPage({
 
   useEffect(() => {
     fetchData();
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    const { error } = await supabase.from("tasks").insert({
-      title: newTask.title,
-      description: newTask.description || null,
-      assigned_to: newTask.assigned_to || null,
-      priority: newTask.priority,
-      due_date: newTask.due_date || null,
-      category_id: id,
-      created_by: profile?.id,
-    });
+
+    const statusToUse = newTask.status || statuses[0]?.value || "";
+    const { data: createdTask, error } = await supabase
+      .from("tasks")
+      .insert({
+        title: newTask.title,
+        description: newTask.description || null,
+        priority: newTask.priority,
+        due_date: newTask.due_date || null,
+        category_id: id,
+        created_by: profile?.id,
+        status: statusToUse,
+      })
+      .select()
+      .single();
+
     if (error) {
       toast(error.message, "error");
-    } else {
+    } else if (createdTask) {
+      if (newTask.assignees.length > 0) {
+        const { error: assignError } = await supabase
+          .from("task_assignees")
+          .insert(
+            newTask.assignees.map((userId) => ({
+              task_id: createdTask.id,
+              user_id: userId,
+            })),
+          );
+        if (assignError) console.error("Error adding assignees:", assignError);
+      }
+
       toast("Task created", "success");
       setShowCreate(false);
       setNewTask({
         title: "",
         description: "",
-        assigned_to: "",
+        assignees: [],
         priority: 2,
         due_date: "",
+        status: statuses[0]?.value || "",
       });
       fetchData();
     }
@@ -200,11 +280,10 @@ export default function CategoryDetailPage({
     );
   }
 
-  const columns: { status: TaskStatus; label: string }[] = [
-    { status: "todo", label: "To Do" },
-    { status: "in_progress", label: "In Progress" },
-    { status: "done", label: "Done" },
-  ];
+  const columns = statuses.map((s) => ({
+    status: s.value,
+    label: s.label,
+  }));
 
   return (
     <>
@@ -295,16 +374,33 @@ export default function CategoryDetailPage({
                                 {new Date(task.due_date).toLocaleDateString()}
                               </span>
                             )}
-                            {(task.assignee as any)?.full_name && (
-                              <div
-                                className="w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center text-[10px] font-medium"
-                                title={(task.assignee as any).full_name}
-                              >
-                                {(task.assignee as any).full_name
-                                  .charAt(0)
-                                  .toUpperCase()}
-                              </div>
-                            )}
+                            <div className="flex -space-x-1 overflow-hidden">
+                              {task.assignees && task.assignees.length > 0
+                                ? task.assignees
+                                    .slice(0, 3)
+                                    .map((assigneeWrapper: any) => {
+                                      const profile =
+                                        assigneeWrapper.profile ||
+                                        assigneeWrapper;
+                                      return (
+                                        <div
+                                          key={profile.id}
+                                          className="w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 border border-white dark:border-gray-800 flex items-center justify-center text-[8px] font-medium"
+                                          title={profile.full_name}
+                                        >
+                                          {(profile.full_name || "?")
+                                            .charAt(0)
+                                            .toUpperCase()}
+                                        </div>
+                                      );
+                                    })
+                                : null}
+                              {task.assignees && task.assignees.length > 3 && (
+                                <div className="w-5 h-5 rounded-full bg-gray-100 dark:bg-gray-800 border border-white dark:border-gray-800 flex items-center justify-center text-[8px] text-gray-500">
+                                  +{task.assignees.length - 3}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -347,15 +443,27 @@ export default function CategoryDetailPage({
               />
             </div>
             <Select
-              label="Assign To"
-              value={newTask.assigned_to}
+              label="Status"
+              value={newTask.status || statuses[0]?.value || ""}
               onChange={(e) =>
-                setNewTask((p) => ({ ...p, assigned_to: e.target.value }))
+                setNewTask((p) => ({ ...p, status: e.target.value }))
               }
-              options={[
-                { value: "", label: "Unassigned" },
-                ...members.map((m) => ({ value: m.id, label: m.full_name })),
-              ]}
+              options={statuses.map((s) => ({
+                value: s.value,
+                label: s.label,
+              }))}
+            />
+            <MultiSelect
+              label="Assign To"
+              selectedValues={newTask.assignees}
+              onChange={(values) =>
+                setNewTask((p) => ({ ...p, assignees: values }))
+              }
+              options={members.map((m) => ({
+                value: m.id,
+                label: m.full_name,
+              }))}
+              placeholder="Select assignees..."
             />
             <Select
               label="Priority"
@@ -446,9 +554,26 @@ export default function CategoryDetailPage({
                   <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                     Assigned To
                   </label>
-                  <p className="text-sm text-gray-900 dark:text-white mt-1">
-                    {(showDetail.assignee as any)?.full_name || "Unassigned"}
-                  </p>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {showDetail.assignees && showDetail.assignees.length > 0 ? (
+                      showDetail.assignees.map((assigneeWrapper: any) => {
+                        const profile =
+                          assigneeWrapper.profile || assigneeWrapper;
+                        return (
+                          <span
+                            key={profile.id}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                          >
+                            {profile.full_name}
+                          </span>
+                        );
+                      })
+                    ) : (
+                      <span className="text-sm text-gray-500 dark:text-gray-400">
+                        Unassigned
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">

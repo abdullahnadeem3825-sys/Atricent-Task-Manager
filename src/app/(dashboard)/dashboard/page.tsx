@@ -58,14 +58,27 @@ export default async function DashboardPage() {
 
   const readIds = new Set(reads?.map((r) => r.announcement_id) || []);
 
-  // Recent tasks
-  const { data: recentTasks } = await supabase
+  // Recent tasks — try with assignees join, fall back if table missing
+  let taskResult = await supabase
     .from("tasks")
     .select(
-      "*, category:categories(name, color), assignee:profiles!assigned_to(full_name)",
+      "*, category:categories(name, color), assignees:task_assignees(profile:profiles(full_name))",
     )
     .order("updated_at", { ascending: false })
     .limit(8);
+
+  if (taskResult.error) {
+    taskResult = await supabase
+      .from("tasks")
+      .select("*, category:categories(name, color)")
+      .order("updated_at", { ascending: false })
+      .limit(8);
+  }
+
+  const recentTasks = (taskResult.data || []).map((t: any) => ({
+    ...t,
+    assignees: t.assignees?.map((a: any) => a.profile).filter(Boolean) || [],
+  }));
 
   return (
     <>
