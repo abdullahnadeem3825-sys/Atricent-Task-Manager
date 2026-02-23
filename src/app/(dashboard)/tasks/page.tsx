@@ -49,7 +49,7 @@ const TaskCard = ({
             // Only modify zIndex during drag, leave the rest to the library
             zIndex: snapshot.isDragging
               ? 50
-              : provided.draggableProps.style?.zIndex,
+              : (provided.draggableProps.style as any)?.zIndex,
           }}
           className={`bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md group relative select-none touch-none ${
             snapshot.isDragging
