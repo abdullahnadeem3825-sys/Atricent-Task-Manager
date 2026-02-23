@@ -124,7 +124,7 @@ export default function AIAssistantPage() {
         id: placeholderId,
         chat_id: activeChat,
         role: "assistant",
-        content: "",
+        content: "Thinking...",
         created_at: new Date().toISOString(),
       },
     ]);

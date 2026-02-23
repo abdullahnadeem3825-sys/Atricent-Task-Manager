@@ -14,7 +14,7 @@ export default function Topbar({ title }: { title?: string }) {
   const themeIcon = theme === "dark" ? "🌙" : theme === "light" ? "☀️" : "💻";
 
   return (
-    <header className="h-16 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex items-center justify-between px-6">
+    <header className="h-16 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex items-center justify-between px-6 sticky top-0 z-40">
       {title && (
         <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
           {title}

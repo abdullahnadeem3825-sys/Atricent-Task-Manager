@@ -37,7 +37,7 @@ export default function CategoriesPage() {
 
     if (cats) {
       const withCounts = await Promise.all(
-        cats.map(async (cat) => {
+        cats.map(async (cat: any) => {
           const { count: memberCount } = await supabase
             .from("category_members")
             .select("*", { count: "exact", head: true })
@@ -95,7 +95,7 @@ export default function CategoriesPage() {
       .from("category_members")
       .select("user_id")
       .eq("category_id", catId);
-    setCatMembers(members?.map((m) => m.user_id) || []);
+    setCatMembers(members?.map((m: any) => m.user_id) || []);
   };
 
   const toggleMember = (userId: string) => {

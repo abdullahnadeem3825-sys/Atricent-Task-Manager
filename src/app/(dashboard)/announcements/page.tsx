@@ -28,6 +28,15 @@ export default function AnnouncementsPage() {
     priority: "info" as const,
   });
 
+  console.log(
+    "userLoading",
+    userLoading,
+    "loading",
+    loading,
+    "profile",
+    profile,
+  );
+
   const fetchAnnouncements = async () => {
     if (!profile) return;
     const { data } = await supabase
@@ -35,15 +44,17 @@ export default function AnnouncementsPage() {
       .select("*, author:profiles!created_by(full_name, email)")
       .order("created_at", { ascending: false });
 
+    console.log("data", data);
+
     const { data: reads } = await supabase
       .from("announcement_reads")
       .select("announcement_id")
       .eq("user_id", profile.id);
 
-    const readIds = new Set(reads?.map((r) => r.announcement_id) || []);
+    const readIds = new Set(reads?.map((r: any) => r.announcement_id) || []);
 
     setAnnouncements(
-      (data || []).map((a) => ({ ...a, is_read: readIds.has(a.id) })),
+      (data || []).map((a: any) => ({ ...a, is_read: readIds.has(a.id) })),
     );
     setLoading(false);
   };

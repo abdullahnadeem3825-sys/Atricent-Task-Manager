@@ -38,7 +38,7 @@ export default function EmployeesPage() {
 
     if (allProfiles) {
       const withCategories = await Promise.all(
-        allProfiles.map(async (profile) => {
+        allProfiles.map(async (profile: any) => {
           const { data: memberships } = await supabase
             .from("category_members")
             .select("category:categories(*)")
@@ -89,7 +89,7 @@ export default function EmployeesPage() {
       .from("category_members")
       .select("category_id")
       .eq("user_id", userId);
-    setEmpCategories(data?.map((m) => m.category_id) || []);
+    setEmpCategories(data?.map((m: any) => m.category_id) || []);
   };
 
   const toggleCategory = (catId: string) => {
@@ -105,14 +105,12 @@ export default function EmployeesPage() {
     setSaving(true);
     await supabase.from("category_members").delete().eq("user_id", showAssign);
     if (empCategories.length > 0) {
-      await supabase
-        .from("category_members")
-        .insert(
-          empCategories.map((category_id) => ({
-            category_id,
-            user_id: showAssign,
-          })),
-        );
+      await supabase.from("category_members").insert(
+        empCategories.map((category_id) => ({
+          category_id,
+          user_id: showAssign,
+        })),
+      );
     }
     toast("Categories updated", "success");
     setShowAssign(null);

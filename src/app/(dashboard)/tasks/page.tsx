@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, memo } from "react";
+import {
+  DragDropContext,
+  Droppable as BaseDroppable,
+  Draggable,
+  DropResult,
+  DroppableProps,
+} from "@hello-pangea/dnd";
 import { useSupabase } from "@/hooks/useSupabase";
 import { useUser } from "@/hooks/useUser";
 import Topbar from "@/components/layout/Topbar";
@@ -18,13 +25,123 @@ import {
 } from "@/lib/constants";
 import type { Task, Category, Profile, TaskStatus } from "@/types";
 
+// Memoized Task Card for performance
+const TaskCard = ({
+  task,
+  index,
+  onClick,
+}: {
+  task: Task;
+  index: number;
+  onClick: (t: Task) => void;
+}) => {
+  const prioInfo = TASK_PRIORITIES.find((p) => p.value === task.priority);
+  return (
+    <Draggable draggableId={task.id} index={index}>
+      {(provided, snapshot) => (
+        <div
+          ref={provided.innerRef}
+          {...provided.draggableProps}
+          {...provided.dragHandleProps}
+          onClick={() => onClick(task)}
+          style={{
+            ...provided.draggableProps.style,
+            // Only modify zIndex during drag, leave the rest to the library
+            zIndex: snapshot.isDragging
+              ? 50
+              : provided.draggableProps.style?.zIndex,
+          }}
+          className={`bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md group relative select-none touch-none ${
+            snapshot.isDragging
+              ? "border-blue-500 shadow-xl ring-1 ring-blue-500/20 z-50 cursor-grabbing bg-blue-50/5 dark:bg-blue-900/5"
+              : "cursor-grab"
+          }`}
+        >
+          <div className="flex justify-between items-start mb-2 pointer-events-none">
+            <Badge className={`${prioInfo?.color} text-[10px] px-1.5 py-0`}>
+              {prioInfo?.label}
+            </Badge>
+            <div className="flex items-center gap-1">
+              <div
+                className="w-1.5 h-1.5 rounded-full"
+                style={{
+                  backgroundColor: (task.category as any)?.color || "#3B82F6",
+                }}
+              />
+              <span className="text-[10px] text-gray-400 truncate max-w-[80px]">
+                {(task.category as any)?.name}
+              </span>
+            </div>
+          </div>
+          <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+            {task.title}
+          </h4>
+          {task.description && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-3 leading-relaxed">
+              {task.description}
+            </p>
+          )}
+          <div className="flex items-center justify-between mt-auto pt-2 border-t border-gray-100 dark:border-gray-700/50">
+            <div className="flex items-center gap-1.5">
+              <div className="w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                {((task.assignee as any)?.full_name || "?").charAt(0)}
+              </div>
+              <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[100px]">
+                {(task.assignee as any)?.full_name || "Unassigned"}
+              </span>
+            </div>
+            {task.due_date && (
+              <div className="text-[10px] text-gray-400 flex items-center gap-1">
+                <svg
+                  className="w-3 h-3"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                  />
+                </svg>
+                {new Date(task.due_date).toLocaleDateString([], {
+                  month: "short",
+                  day: "numeric",
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </Draggable>
+  );
+};
+
+TaskCard.displayName = "TaskCard";
+
+// Wrapper to fix React 18+ / Next.js Strict Mode issues with dnd
+const Droppable = ({ children, ...props }: DroppableProps) => {
+  const [enabled, setEnabled] = useState(false);
+  useEffect(() => {
+    const animation = requestAnimationFrame(() => setEnabled(true));
+    return () => {
+      cancelAnimationFrame(animation);
+      setEnabled(false);
+    };
+  }, []);
+  if (!enabled) {
+    return null;
+  }
+  return <BaseDroppable {...props}>{children}</BaseDroppable>;
+};
+
 export default function TasksPage() {
   const supabase = useSupabase();
   const { profile, isAdmin, loading: userLoading } = useUser();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [showDetail, setShowDetail] = useState<Task | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -161,12 +278,51 @@ export default function TasksPage() {
     setAiLoading(false);
   };
 
-  const filteredTasks = tasks.filter((t) => {
-    if (filterStatus !== "all" && t.status !== filterStatus) return false;
-    if (filterCategory !== "all" && t.category_id !== filterCategory)
-      return false;
-    return true;
-  });
+  const kanbanColumns = useMemo(() => {
+    const columns: Record<string, Task[]> = {};
+    TASK_STATUSES.forEach((s) => {
+      columns[s.value] = [];
+    });
+    tasks.forEach((t) => {
+      if (filterCategory === "all" || t.category_id === filterCategory) {
+        if (columns[t.status]) {
+          columns[t.status].push(t);
+        }
+      }
+    });
+    return columns;
+  }, [tasks, filterCategory]);
+
+  const onDragEnd = async (result: DropResult) => {
+    const { source, destination, draggableId } = result;
+
+    if (!destination) return;
+    if (
+      source.droppableId === destination.droppableId &&
+      source.index === destination.index
+    ) {
+      return;
+    }
+
+    const newStatus = destination.droppableId as TaskStatus;
+
+    // Optimistic Update: Update local state immediately
+    setTasks((prev) =>
+      prev.map((t) => (t.id === draggableId ? { ...t, status: newStatus } : t)),
+    );
+
+    // Perform database update in the background
+    const { error } = await supabase
+      .from("tasks")
+      .update({ status: newStatus })
+      .eq("id", draggableId);
+
+    if (error) {
+      toast("Failed to update status", "error");
+      // Revert on error if necessary, though simpler to just notify for now
+      fetchData();
+    }
+  };
 
   if (userLoading || loading) {
     return (
@@ -182,21 +338,9 @@ export default function TasksPage() {
   return (
     <>
       <Topbar title="Tasks" />
-      <div className="p-6">
+      <div className="p-6 h-[calc(100vh-64px)] flex flex-col">
         <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
-            >
-              <option value="all">All Statuses</option>
-              {TASK_STATUSES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
             <select
               value={filterCategory}
               onChange={(e) => setFilterCategory(e.target.value)}
@@ -210,123 +354,66 @@ export default function TasksPage() {
               ))}
             </select>
             <span className="text-sm text-gray-400">
-              {filteredTasks.length} tasks
+              {tasks.length} total tasks
             </span>
           </div>
           <Button onClick={() => setShowCreate(true)}>+ New Task</Button>
         </div>
 
-        {filteredTasks.length === 0 ? (
-          <div className="text-center py-16">
-            <div className="text-4xl mb-4">📝</div>
-            <p className="text-gray-500 dark:text-gray-400">No tasks found</p>
-          </div>
-        ) : (
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                    Task
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                    Category
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                    Assignee
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                    Priority
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                    Status
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                    Due
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {filteredTasks.map((task) => {
-                  const prioInfo = TASK_PRIORITIES.find(
-                    (p) => p.value === task.priority,
-                  );
-                  const statusInfo = TASK_STATUSES.find(
-                    (s) => s.value === task.status,
-                  );
-                  return (
-                    <tr
-                      key={task.id}
-                      onClick={() => {
-                        setShowDetail(task);
-                        setAiResult("");
-                      }}
-                      className="hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer transition-colors"
-                    >
-                      <td className="px-4 py-3">
-                        <p className="text-sm font-medium text-gray-900 dark:text-white">
-                          {task.title}
-                        </p>
-                        {task.description && (
-                          <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
-                            {task.description}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
+        <div className="flex-1 overflow-x-auto min-h-0">
+          <DragDropContext onDragEnd={onDragEnd}>
+            <div className="flex gap-4 h-full min-w-max pb-4">
+              {TASK_STATUSES.map((status) => (
+                <div
+                  key={status.value}
+                  className="w-80 flex flex-col h-full bg-gray-100 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-800 p-3"
+                >
+                  <div className="flex items-center justify-between mb-4 px-1">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`w-2.5 h-2.5 rounded-full ${status.color.replace("text-", "bg-")}`}
+                      />
+                      <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-200">
+                        {status.label}
+                      </h3>
+                      <span className="text-xs text-gray-400 font-normal">
+                        {kanbanColumns[status.value].length}
+                      </span>
+                    </div>
+                  </div>
+
+                  <Droppable droppableId={status.value} type="TASK">
+                    {(provided, snapshot) => (
+                      <div
+                        {...provided.droppableProps}
+                        ref={provided.innerRef}
+                        className={`flex-1 flex flex-col gap-3 min-h-[200px] rounded-lg p-1 ${
+                          snapshot.isDraggingOver
+                            ? "bg-gray-200/50 dark:bg-gray-800/20"
+                            : ""
+                        }`}
+                      >
+                        {kanbanColumns[status.value].map((task, index) => (
                           <div
-                            className="w-2 h-2 rounded-full"
-                            style={{
-                              backgroundColor:
-                                (task.category as any)?.color || "#3B82F6",
-                            }}
-                          />
-                          <span className="text-sm text-gray-700 dark:text-gray-300">
-                            {(task.category as any)?.name}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
-                        {(task.assignee as any)?.full_name || "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge className={prioInfo?.color}>
-                          {prioInfo?.label}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3">
-                        <select
-                          value={task.status}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            updateTaskStatus(
-                              task.id,
-                              e.target.value as TaskStatus,
-                            );
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          className="rounded border border-gray-200 dark:border-gray-700 bg-transparent px-2 py-0.5 text-xs text-gray-700 dark:text-gray-300"
-                        >
-                          {TASK_STATUSES.map((s) => (
-                            <option key={s.value} value={s.value}>
-                              {s.label}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
-                        {task.due_date
-                          ? new Date(task.due_date).toLocaleDateString()
-                          : "—"}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                            key={task.id}
+                            className="transition-transform duration-200 ease-out"
+                          >
+                            <TaskCard
+                              task={task}
+                              index={index}
+                              onClick={setShowDetail}
+                            />
+                          </div>
+                        ))}
+                        {provided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                </div>
+              ))}
+            </div>
+          </DragDropContext>
+        </div>
 
         {/* Create Task Modal */}
         <Modal
